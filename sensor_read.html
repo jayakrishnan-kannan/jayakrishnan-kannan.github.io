@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accelerometer Logger</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f7;
+            color: #1d1d1f;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .container {
+            max-width: 400px;
+            width: 100%;
+            background: white;
+            padding: 24px;
+            border-radius: 16px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            box-sizing: border-box;
+        }
+        h1 {
+            font-size: 24px;
+            margin-top: 0;
+            text-align: center;
+        }
+        .status {
+            padding: 12px;
+            border-radius: 8px;
+            background-color: #e8e8ed;
+            text-align: center;
+            font-weight: 600;
+            margin-bottom: 20px;
+        }
+        .status.logging {
+            background-color: #34c759;
+            color: white;
+        }
+        .data-display {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .data-card {
+            background: #f5f5f7;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .data-label {
+            font-size: 12px;
+            color: #86868b;
+            text-transform: uppercase;
+        }
+        .data-value {
+            font-size: 20px;
+            font-weight: bold;
+            margin-top: 4px;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            font-size: 16px;
+            font-weight: 600;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            margin-bottom: 10px;
+            transition: background-color 0.2s;
+        }
+        .btn-start {
+            background-color: #0071e3;
+            color: white;
+        }
+        .btn-start:disabled {
+            background-color: #bae0ff;
+        }
+        .btn-stop {
+            background-color: #ff3b30;
+            color: white;
+        }
+        .btn-download {
+            background-color: #34c759;
+            color: white;
+        }
+        .log-count {
+            text-align: center;
+            font-size: 14px;
+            color: #86868b;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Accel Logger</h1>
+    <div id="status" class="status">Ready</div>
+    
+    <div class="data-display">
+        <div class="data-card"><div class="data-label">X-Axis</div><div id="val-x" class="data-value">0.00</div></div>
+        <div class="data-card"><div class="data-label">Y-Axis</div><div id="val-y" class="data-value">0.00</div></div>
+        <div class="data-card"><div class="data-label">Z-Axis</div><div id="val-z" class="data-value">0.00</div></div>
+        <div class="data-card"><div class="data-label">Records</div><div id="val-count" class="data-value">0</div></div>
+    </div>
+
+    <button id="btn-perm" class="btn-start">Grant Sensor Permission</button>
+    <button id="btn-start" class="btn-start" style="display:none;">Start Logging</button>
+    <button id="btn-stop" class="btn-stop" style="display:none;">Stop Logging</button>
+    <button id="btn-download" class="btn-download" style="display:none;">Download CSV</button>
+    
+    <div id="log-info" class="log-count">Sensors require HTTPS to function.</div>
+</div>
+
+<script>
+    let motionData = [];
+    let isLogging = false;
+    
+    const btnPerm = document.getElementById('btn-perm');
+    const btnStart = document.getElementById('btn-start');
+    const btnStop = document.getElementById('btn-stop');
+    const btnDownload = document.getElementById('btn-download');
+    const statusDiv = document.getElementById('status');
+    
+    const valX = document.getElementById('val-x');
+    const valY = document.getElementById('val-y');
+    const valZ = document.getElementById('val-z');
+    const valCount = document.getElementById('val-count');
+
+    // Handle Permissions
+    btnPerm.addEventListener('click', async () => {
+        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+            try {
+                const permissionState = await DeviceMotionEvent.requestPermission();
+                if (permissionState === 'granted') {
+                    initSensors();
+                } else {
+                    alert('Permission to access accelerometer was denied.');
+                }
+            } catch (error) {
+                alert('Error requesting permission: ' + error);
+            }
+        } else {
+            // Android or non-iOS 13+ devices typically do not require explicit requestPermission token
+            initSensors();
+        }
+    });
+
+    function initSensors() {
+        btnPerm.style.display = 'none';
+        btnStart.style.display = 'block';
+        statusDiv.innerText = 'Sensors Active';
+    }
+
+    // Motion Event Handler
+    function handleMotionEvent(event) {
+        if (!isLogging) return;
+        
+        const accel = event.accelerationIncludingGravity || event.acceleration;
+        if (!accel) return;
+
+        const x = accel.x || 0;
+        const y = accel.y || 0;
+        const z = accel.z || 0;
+        const timestamp = new Date().toISOString();
+
+        // Update real-time UI
+        valX.innerText = x.toFixed(2);
+        valY.innerText = y.toFixed(2);
+        valZ.innerText = z.toFixed(2);
+
+        // Save to data log
+        motionData.push({ timestamp, x, y, z });
+        valCount.innerText = motionData.length;
+    }
+
+    // Control buttons
+    btnStart.addEventListener('click', () => {
+        motionData = []; // Reset on new session
+        isLogging = true;
+        window.addEventListener('devicemotion', handleMotionEvent, true);
+        
+        btnStart.style.display = 'none';
+        btnStop.style.display = 'block';
+        btnDownload.style.display = 'none';
+        
+        statusDiv.innerText = 'LOGGING...';
+        statusDiv.classList.add('logging');
+    });
+
+    btnStop.addEventListener('click', () => {
+        isLogging = false;
+        window.removeEventListener('devicemotion', handleMotionEvent, true);
+        
+        btnStop.style.display = 'none';
+        btnStart.style.display = 'block';
+        if (motionData.length > 0) {
+            btnDownload.style.display = 'block';
+        }
+        
+        statusDiv.innerText = 'Stopped';
+        statusDiv.classList.remove('logging');
+    });
+
+    btnDownload.addEventListener('click', () => {
+        if (motionData.length === 0) return;
+
+        // Build CSV string
+        let csvContent = "Timestamp,X-Axis,Y-Axis,Z-Axis\n";
+        motionData.forEach(row => {
+            csvContent += `${row.timestamp},${row.x},${row.y},${row.z}\n`;
+        });
+
+        // Trigger dynamic download anchor
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.setAttribute("href", url);
+        link.setAttribute("download", `accelerometer_log_${Date.now()}.csv`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    });
+</script>
+
+</body>
+</html>
