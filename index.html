@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Accelerometer Logger</title>
+    <title>IMU Logger</title>
     <style>
         body {
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -24,11 +24,7 @@
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
             box-sizing: border-box;
         }
-        h1 {
-            font-size: 24px;
-            margin-top: 0;
-            text-align: center;
-        }
+        h1 { font-size: 24px; margin-top: 0; text-align: center; }
         .status {
             padding: 12px;
             border-radius: 8px;
@@ -37,31 +33,31 @@
             font-weight: 600;
             margin-bottom: 20px;
         }
-        .status.logging {
-            background-color: #34c759;
-            color: white;
+        .status.logging { background-color: #34c759; color: white; }
+        .status.error { background-color: #ff3b30; color: white; }
+        .group-label {
+            font-size: 12px;
+            color: #86868b;
+            margin: 0 0 6px 2px;
         }
         .data-display {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-            margin-bottom: 20px;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 16px;
         }
         .data-card {
             background: #f5f5f7;
-            padding: 12px;
+            padding: 10px 6px;
             border-radius: 8px;
             text-align: center;
         }
-        .data-label {
-            font-size: 12px;
-            color: #86868b;
-            text-transform: uppercase;
-        }
+        .data-label { font-size: 12px; color: #86868b; }
         .data-value {
-            font-size: 20px;
+            font-size: 18px;
             font-weight: bold;
             margin-top: 4px;
+            font-variant-numeric: tabular-nums;
         }
         button {
             width: 100%;
@@ -74,158 +70,237 @@
             margin-bottom: 10px;
             transition: background-color 0.2s;
         }
-        .btn-start {
-            background-color: #0071e3;
-            color: white;
-        }
-        .btn-start:disabled {
-            background-color: #bae0ff;
-        }
-        .btn-stop {
-            background-color: #ff3b30;
-            color: white;
-        }
-        .btn-download {
-            background-color: #34c759;
-            color: white;
-        }
+        .btn-start { background-color: #0071e3; color: white; }
+        .btn-start:disabled { background-color: #bae0ff; }
+        .btn-stop { background-color: #ff3b30; color: white; }
+        .btn-download { background-color: #34c759; color: white; }
         .log-count {
             text-align: center;
             font-size: 14px;
             color: #86868b;
             margin-top: 10px;
+            line-height: 1.5;
         }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h1>Accel Logger</h1>
+    <h1>IMU Logger</h1>
     <div id="status" class="status">Ready</div>
-    
+
+    <div class="group-label">Accelerometer (m/s², incl. gravity)</div>
     <div class="data-display">
-        <div class="data-card"><div class="data-label">X-Axis</div><div id="val-x" class="data-value">0.00</div></div>
-        <div class="data-card"><div class="data-label">Y-Axis</div><div id="val-y" class="data-value">0.00</div></div>
-        <div class="data-card"><div class="data-label">Z-Axis</div><div id="val-z" class="data-value">0.00</div></div>
-        <div class="data-card"><div class="data-label">Records</div><div id="val-count" class="data-value">0</div></div>
+        <div class="data-card"><div class="data-label">AX</div><div id="ax" class="data-value">0.00</div></div>
+        <div class="data-card"><div class="data-label">AY</div><div id="ay" class="data-value">0.00</div></div>
+        <div class="data-card"><div class="data-label">AZ</div><div id="az" class="data-value">0.00</div></div>
+    </div>
+
+    <div class="group-label">Gyroscope (rad/s)</div>
+    <div class="data-display">
+        <div class="data-card"><div class="data-label">GX</div><div id="gx" class="data-value">0.000</div></div>
+        <div class="data-card"><div class="data-label">GY</div><div id="gy" class="data-value">0.000</div></div>
+        <div class="data-card"><div class="data-label">GZ</div><div id="gz" class="data-value">0.000</div></div>
+    </div>
+
+    <div class="data-display">
+        <div class="data-card"><div class="data-label">Samples</div><div id="val-count" class="data-value">0</div></div>
+        <div class="data-card"><div class="data-label">Time (s)</div><div id="val-dur" class="data-value">0.0</div></div>
+        <div class="data-card"><div class="data-label">Rate (Hz)</div><div id="val-rate" class="data-value">—</div></div>
     </div>
 
     <button id="btn-perm" class="btn-start">Grant Sensor Permission</button>
     <button id="btn-start" class="btn-start" style="display:none;">Start Logging</button>
     <button id="btn-stop" class="btn-stop" style="display:none;">Stop Logging</button>
-    <button id="btn-download" class="btn-download" style="display:none;">Download CSV</button>
-    
+    <button id="btn-download" class="btn-download" style="display:none;">Download log</button>
+
     <div id="log-info" class="log-count">Sensors require HTTPS to function.</div>
 </div>
 
 <script>
-    let motionData = [];
+    /*
+     * Output = imu-stream line format v1, same as the firmware:
+     *   <ver>,<t_ms>,<sensor>,<CHANNEL>,<v1>[,<v2>,<v3>]
+     *   1,10234.512,imu0,ACCEL_XYZ,0.012000,-0.020000,9.806650
+     *   1,10234.512,imu0,GYRO_XYZ,0.001000,0.002000,-0.000300
+     * t_ms   ms from Start, from the sensor event time (not wall clock)
+     * ACCEL  m/s^2 including gravity (flat, screen up: z = +9.81)
+     * GYRO   rad/s. Browser gives deg/s: beta = about X, gamma = about Y, alpha = about Z
+     * Lines starting with '#' are metadata; the viewer and log-to-resd.sh skip them.
+     */
+    const FMT_VERSION = 1;
+    const SENSOR_NAME = 'imu0';
+    const DEG = Math.PI / 180;
+
+    let lines = [];          // finished v1 lines
     let isLogging = false;
-    
+    let t0 = null;           // event time of first sample (ms)
+    let tLast = 0;
+    let samples = 0;
+    let gyroSeen = false;
+    let interval = null;     // browser-reported sample interval (ms)
+    let startedAt = null;
+    let wakeLock = null;
+
     const btnPerm = document.getElementById('btn-perm');
     const btnStart = document.getElementById('btn-start');
     const btnStop = document.getElementById('btn-stop');
     const btnDownload = document.getElementById('btn-download');
     const statusDiv = document.getElementById('status');
-    
-    const valX = document.getElementById('val-x');
-    const valY = document.getElementById('val-y');
-    const valZ = document.getElementById('val-z');
-    const valCount = document.getElementById('val-count');
+    const info = document.getElementById('log-info');
+    const el = id => document.getElementById(id);
+
+    function setStatus(text, cls) {
+        statusDiv.innerText = text;
+        statusDiv.className = 'status' + (cls ? ' ' + cls : '');
+    }
+
+    /* 6 decimals like the firmware; a missing value is written as 0 */
+    function f6(v) { return (Number.isFinite(v) ? v : 0).toFixed(6); }
 
     // Handle Permissions
     btnPerm.addEventListener('click', async () => {
-        if (typeof DeviceMotionEvent !== 'undefined' && typeof DeviceMotionEvent.requestPermission === 'function') {
+        if (!window.isSecureContext) {
+            setStatus('Needs HTTPS', 'error');
+            info.innerText = 'Open this page over https:// (or localhost). Plain http blocks the sensors.';
+            return;
+        }
+        if (typeof DeviceMotionEvent === 'undefined') {
+            setStatus('No motion sensors', 'error');
+            return;
+        }
+        if (typeof DeviceMotionEvent.requestPermission === 'function') {
             try {
                 const permissionState = await DeviceMotionEvent.requestPermission();
-                if (permissionState === 'granted') {
-                    initSensors();
-                } else {
-                    alert('Permission to access accelerometer was denied.');
+                if (permissionState !== 'granted') {
+                    setStatus('Permission denied', 'error');
+                    info.innerText = 'Allow motion access in the browser settings, then reload.';
+                    return;
                 }
             } catch (error) {
-                alert('Error requesting permission: ' + error);
+                setStatus('Permission error', 'error');
+                info.innerText = String(error);
+                return;
             }
-        } else {
-            // Android or non-iOS 13+ devices typically do not require explicit requestPermission token
-            initSensors();
         }
+        initSensors();
     });
 
     function initSensors() {
         btnPerm.style.display = 'none';
         btnStart.style.display = 'block';
-        statusDiv.innerText = 'Sensors Active';
+        setStatus('Sensors Active');
+        info.innerText = 'Lay the phone flat, screen up, then Start.';
     }
 
     // Motion Event Handler
     function handleMotionEvent(event) {
         if (!isLogging) return;
-        
-        const accel = event.accelerationIncludingGravity || event.acceleration;
-        if (!accel) return;
 
-        const x = accel.x || 0;
-        const y = accel.y || 0;
-        const z = accel.z || 0;
-        const timestamp = new Date().toISOString();
+        /* with gravity only: mixing in event.acceleration (no gravity) would corrupt the log */
+        const a = event.accelerationIncludingGravity;
+        if (!a || a.x === null || a.y === null || a.z === null) return;
+
+        const ts = (typeof event.timeStamp === 'number' && event.timeStamp > 0) ? event.timeStamp : performance.now();
+        if (t0 === null) t0 = ts;
+        tLast = ts - t0;
+        if (event.interval) interval = event.interval;
+
+        const head = FMT_VERSION + ',' + tLast.toFixed(3) + ',' + SENSOR_NAME + ',';
+        lines.push(head + 'ACCEL_XYZ,' + f6(a.x) + ',' + f6(a.y) + ',' + f6(a.z));
+
+        const r = event.rotationRate;
+        let g = null;
+        if (r && r.alpha !== null && r.beta !== null && r.gamma !== null) {
+            g = [r.beta * DEG, r.gamma * DEG, r.alpha * DEG];
+            gyroSeen = true;
+            lines.push(head + 'GYRO_XYZ,' + f6(g[0]) + ',' + f6(g[1]) + ',' + f6(g[2]));
+        }
+        samples++;
 
         // Update real-time UI
-        valX.innerText = x.toFixed(2);
-        valY.innerText = y.toFixed(2);
-        valZ.innerText = z.toFixed(2);
-
-        // Save to data log
-        motionData.push({ timestamp, x, y, z });
-        valCount.innerText = motionData.length;
+        el('ax').innerText = a.x.toFixed(2);
+        el('ay').innerText = a.y.toFixed(2);
+        el('az').innerText = a.z.toFixed(2);
+        if (g) {
+            el('gx').innerText = g[0].toFixed(3);
+            el('gy').innerText = g[1].toFixed(3);
+            el('gz').innerText = g[2].toFixed(3);
+        }
+        el('val-count').innerText = samples;
+        el('val-dur').innerText = (tLast / 1000).toFixed(1);
+        if (tLast > 0) el('val-rate').innerText = ((samples - 1) * 1000 / tLast).toFixed(1);
     }
 
     // Control buttons
     btnStart.addEventListener('click', () => {
-        motionData = []; // Reset on new session
+        startedAt = new Date();
+        lines = [
+            '# imu-logger, format v' + FMT_VERSION,
+            '# source: phone browser (DeviceMotionEvent)',
+            '# started: ' + startedAt.toISOString(),
+            '# device: ' + navigator.userAgent,
+            '# units: ACCEL_XYZ m/s^2 incl. gravity, GYRO_XYZ rad/s (browser deg/s converted)'
+        ];
+        t0 = null; tLast = 0; samples = 0; gyroSeen = false; interval = null;
         isLogging = true;
         window.addEventListener('devicemotion', handleMotionEvent, true);
-        
+
+        /* keep the screen on: a locked screen stops motion events */
+        if ('wakeLock' in navigator) {
+            navigator.wakeLock.request('screen').then(l => { wakeLock = l; }).catch(() => {});
+        }
+
         btnStart.style.display = 'none';
         btnStop.style.display = 'block';
         btnDownload.style.display = 'none';
-        
-        statusDiv.innerText = 'LOGGING...';
-        statusDiv.classList.add('logging');
+
+        setStatus('LOGGING...', 'logging');
+        info.innerText = 'Keep this page in front; switching apps pauses the sensors.';
+
+        setTimeout(() => {
+            if (!isLogging) return;
+            if (!samples) info.innerText = 'No motion data. Open this page on a phone.';
+            else if (!gyroSeen) info.innerText = 'No gyroscope on this phone: logging accelerometer only.';
+        }, 2500);
     });
 
     btnStop.addEventListener('click', () => {
         isLogging = false;
         window.removeEventListener('devicemotion', handleMotionEvent, true);
-        
+        if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+
+        const dur = tLast / 1000;
+        const rate = dur > 0 ? (samples - 1) / dur : 0;
+        lines.push('# stopped: ' + new Date().toISOString() + ', samples ' + samples +
+                   ', ' + dur.toFixed(3) + ' s, mean rate ' + rate.toFixed(1) + ' Hz' +
+                   (interval ? ', browser interval ' + interval + ' ms' : '') +
+                   (gyroSeen ? '' : ', no gyro'));
+
         btnStop.style.display = 'none';
         btnStart.style.display = 'block';
-        if (motionData.length > 0) {
-            btnDownload.style.display = 'block';
-        }
-        
-        statusDiv.innerText = 'Stopped';
-        statusDiv.classList.remove('logging');
+        if (samples > 0) btnDownload.style.display = 'block';
+
+        setStatus('Stopped');
+        info.innerText = samples + ' samples, ' + rate.toFixed(1) + ' Hz';
     });
 
     btnDownload.addEventListener('click', () => {
-        if (motionData.length === 0) return;
+        if (samples === 0) return;
+        const p2 = n => String(n).padStart(2, '0');
+        const d = startedAt;
+        const stamp = d.getFullYear() + p2(d.getMonth() + 1) + p2(d.getDate()) + '-' +
+                      p2(d.getHours()) + p2(d.getMinutes()) + p2(d.getSeconds());
 
-        // Build CSV string
-        let csvContent = "Timestamp,X-Axis,Y-Axis,Z-Axis\n";
-        motionData.forEach(row => {
-            csvContent += `${row.timestamp},${row.x},${row.y},${row.z}\n`;
-        });
-
-        // Trigger dynamic download anchor
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const blob = new Blob([lines.join('\n') + '\n'], { type: 'text/plain;charset=utf-8;' });
         const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `accelerometer_log_${Date.now()}.csv`);
+        const link = document.createElement('a');
+        link.setAttribute('href', url);
+        link.setAttribute('download', SENSOR_NAME + '-phone-' + stamp + '.log');
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
     });
 </script>
 
